@@ -516,31 +516,46 @@ bool BackgroundTiles::checkOrdering() const
 	}
 	
 	// Check tileID
-	
-	QList<BackgroundTiles> reordered(4);
+
+	QList< QMap<quint64, QList<Tile> > > reordered(4);
+
+	// Ordering with color depth=2 cannot be guessed
+	// hill2 is strange with shifted tiles in layer 4
 
 	for (const Tile &tile : *this) {
-		qint32 ordering = 0;
-		if (tile.layerID == 0) {
-			ordering = (tile.paletteID << 20) | (tile.dstY << 10) | tile.dstX;
-		} else {
-			ordering = (tile.dstY << 20) | (tile.dstX << 10) | tile.param;
+		quint64 ordering = 0;
+		quint8 state = 0;
+		for (int i = 0; i < 8; ++i) {
+			if ((tile.state >> i) & 1) {
+				state = i;
+				break;
+			}
 		}
-		reordered[tile.layerID].insert(ordering, tile);
-	}
+		if (tile.layerID == 0) {
+			ordering = (quint64(tile.depth) << 40) | (quint64(tile.paletteID) << 32) | (quint64((tile.dstY + 1024) / 16) << 24) | (quint64((tile.dstX + 1024) / 16) << 16);
+		} else if (tile.layerID == 1) {
+			ordering = (quint64((tile.dstY + 1024) / 16) << 57) | (quint64((tile.dstX + 1024) / 16) << 49); // | (quint64(tile.ID) << 36) | (quint64(tile.paletteID) << 28) | (quint64(256 - tile.param) << 20) | (quint64(8 - state) << 16);
+		} else {
+			ordering = (quint64(tile.depth) << 50) | (quint64(tile.paletteID) << 42) | (quint64((tile.dstY + 1024) / 32) << 35) | (quint64((tile.dstX + 1024) / 32) << 28); // | (quint64(256 - tile.param) << 20) | (quint64(8 - state) << 16);
+		}
+		ordering |= tile.tileID;
+		reordered[tile.layerID][ordering].append(tile);
+	} // hill2 BackgroundTiles::checkOrdering wrong tile order 3 39 37 textureID 4 src 224 128 dst 16 -112 depth 1 paletteID 11 param 2 2
 
 	for (quint8 layerID = 0; layerID < 4; ++layerID) {
 		int tileID = 0;
-		for (const Tile &tile : reordered.at(layerID)) {
-			if (tile.layerID != layerID) {
-				continue;
-			}
+		for (const QList<Tile> &tiles : reordered.at(layerID)) {
+			for (const Tile &tile: tiles) {
+				if (tile.layerID != layerID) {
+					continue;
+				}
 
-			if (tile.tileID != tileID) {
-				qDebug() << "BackgroundTiles::checkOrdering wrong tile order" << layerID << tile.tileID << tileID << tile.textureID << tile.srcX << tile.srcY;
-				break;
+				if (tile.tileID != tileID) {
+					qDebug() << "BackgroundTiles::checkOrdering wrong tile order" << layerID << tile.tileID << tileID << "textureID" << tile.textureID << "src" << tile.srcX << tile.srcY << "dst" << tile.dstX << tile.dstY << "depth" << tile.depth << "paletteID" << tile.paletteID << "param" << tile.param << tile.state;
+					return false;
+				}
+				++tileID;
 			}
-			++tileID;
 		}
 	}
 
